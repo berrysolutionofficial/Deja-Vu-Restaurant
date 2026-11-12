@@ -1,0 +1,6 @@
+{
+  "name": "Deja Vu Restaurant - BBQ & Grill",
+  "description": "Premium BBQ, Sizzling Steaks, Handcrafted Burgers, Karahi & Continental dining experience in Gulistan-e-Johar, Karachi. Order online with live tracking and doorstep delivery.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
