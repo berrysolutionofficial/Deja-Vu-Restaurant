@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRestaurant } from '../context/RestaurantContext';
 import { formatPrice } from '../utils/format';
-import { X, Bike, ShoppingBag, Utensils, ArrowRight, MessageSquare, ShieldCheck } from 'lucide-react';
+import { X, Bike, ShoppingBag, Utensils, ArrowRight, MessageSquare, ShieldCheck, Clock, AlertTriangle } from 'lucide-react';
 
 export const CheckoutModal: React.FC = () => {
   const {
@@ -16,6 +16,7 @@ export const CheckoutModal: React.FC = () => {
     tableNumber,
     placeOrder,
     user,
+    timingStatus,
   } = useRestaurant();
 
   const [customerName, setCustomerName] = useState(user?.name || '');
@@ -25,11 +26,21 @@ export const CheckoutModal: React.FC = () => {
   const [paymentMethod, setPaymentMethod] = useState<'cod' | 'online' | 'cash'>('cod');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Sync user info if user logs in while modal is open
+  useEffect(() => {
+    if (user?.name && !customerName) {
+      setCustomerName(user.name);
+    }
+    if (user?.phone && !customerPhone) {
+      setCustomerPhone(user.phone);
+    }
+  }, [user]);
+
   if (!isCheckoutModalOpen) return null;
 
   const total = cartSubtotal + (orderType === 'delivery' ? deliveryFee : 0);
 
-  const handleSubmit = (e: React.FormEvent, sendToWhatsapp: boolean) => {
+  const handleSubmit = async (e: React.FormEvent, sendToWhatsapp: boolean) => {
     e.preventDefault();
     if (!customerName.trim() || !customerPhone.trim()) {
       alert('Please provide your full name and phone number to confirm your order.');
@@ -42,41 +53,46 @@ export const CheckoutModal: React.FC = () => {
 
     setIsSubmitting(true);
 
-    const createdOrder = placeOrder({
-      customerName,
-      customerPhone,
-      deliveryAddress: address,
-      specialNotes: notes,
-      paymentMethod,
-    });
+    try {
+      const createdOrder = await placeOrder({
+        customerName,
+        customerPhone,
+        deliveryAddress: address,
+        specialNotes: notes,
+        paymentMethod,
+      });
 
-    if (sendToWhatsapp) {
-      // Build clean WhatsApp message to 0325-9111555
-      const itemsList = cart
-        .map(c => `• ${c.quantity}x ${c.item.name}${c.portion ? ` (${c.portion.label})` : ''} - ${formatPrice(c.totalPrice)}`)
-        .join('%0A');
+      if (sendToWhatsapp) {
+        // Build clean WhatsApp message to 0325-9111555
+        const itemsList = cart
+          .map(c => `• ${c.quantity}x ${c.item.name}${c.portion ? ` (${c.portion.label})` : ''} - ${formatPrice(c.totalPrice)}`)
+          .join('%0A');
 
-      const waText = 
-        `*NEW ORDER FROM DEJA VU WEBSITE*%0A` +
-        `*Order ID:* ${createdOrder.orderNumber}%0A` +
-        `*Order Type:* ${orderType.toUpperCase()}%0A` +
-        `*Customer Name:* ${encodeURIComponent(customerName)}%0A` +
-        `*Phone:* ${encodeURIComponent(customerPhone)}%0A` +
-        (orderType === 'delivery' ? `*Area:* ${encodeURIComponent(selectedArea.name)} (~${selectedArea.distanceKm} km)%0A*Address:* ${encodeURIComponent(address)}%0A` : '') +
-        (orderType === 'dine-in' ? `*Table/Party:* ${encodeURIComponent(tableNumber || 'Seated')} %0A` : '') +
-        `------------------------%0A` +
-        `*ITEMS:*%0A${itemsList}%0A` +
-        `------------------------%0A` +
-        `*Subtotal:* ${formatPrice(cartSubtotal)}%0A` +
-        (orderType === 'delivery' ? `*Delivery Fee:* ${formatPrice(deliveryFee)}%0A` : '') +
-        `*TOTAL AMOUNT:* ${formatPrice(total)}%0A` +
-        `*Payment Method:* ${paymentMethod.toUpperCase()}%0A` +
-        (notes ? `*Special Instructions:* ${encodeURIComponent(notes)}%0A` : '');
+        const waText = 
+          `*NEW ORDER FROM DEJA VU WEBSITE*%0A` +
+          `*Order ID:* ${createdOrder.orderNumber}%0A` +
+          `*Order Type:* ${orderType.toUpperCase()}%0A` +
+          `*Customer Name:* ${encodeURIComponent(customerName)}%0A` +
+          `*Phone:* ${encodeURIComponent(customerPhone)}%0A` +
+          (orderType === 'delivery' ? `*Area:* ${encodeURIComponent(selectedArea.name)} (~${selectedArea.distanceKm} km)%0A*Address:* ${encodeURIComponent(address)}%0A` : '') +
+          (orderType === 'dine-in' ? `*Table/Party:* ${encodeURIComponent(tableNumber || 'Seated')} %0A` : '') +
+          `------------------------%0A` +
+          `*ITEMS:*%0A${itemsList}%0A` +
+          `------------------------%0A` +
+          `*Subtotal:* ${formatPrice(cartSubtotal)}%0A` +
+          (orderType === 'delivery' ? `*Delivery Fee:* ${formatPrice(deliveryFee)}%0A` : '') +
+          `*TOTAL AMOUNT:* ${formatPrice(total)}%0A` +
+          `*Payment Method:* ${paymentMethod.toUpperCase()}%0A` +
+          (notes ? `*Special Instructions:* ${encodeURIComponent(notes)}%0A` : '') +
+          `*Restaurant Timings:* 11:00 AM – 2:00 AM PKT`;
 
-      window.open(`https://wa.me/923259111555?text=${waText}`, '_blank');
+        window.open(`https://wa.me/923259111555?text=${waText}`, '_blank');
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setIsSubmitting(false);
   };
 
   return (
@@ -92,18 +108,43 @@ export const CheckoutModal: React.FC = () => {
         </button>
 
         {/* Modal Header */}
-        <div className="mb-5">
+        <div className="mb-4">
           <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[#c99a2c] dark:text-amber-400 mb-1">
             <ShieldCheck className="w-4 h-4" />
-            <span>Official Checkout</span>
+            <span>Official Checkout &amp; Order Placement</span>
           </div>
           <h2 className="text-xl sm:text-2xl font-bold font-serif-luxury tracking-tight">
             Confirm Your Order
           </h2>
           <p className="text-xs text-stone-500 dark:text-stone-400 mt-0.5">
-            Deja Vu Restaurant BBQ &amp; Grill · WhatsApp: 0325-9111555 · Timings: 11:00 AM – 2:00 AM
+            D&eacute;j&agrave; Vu Restaurant BBQ &amp; Grill · WhatsApp: 0325-9111555
           </p>
         </div>
+
+        {/* Timing Status Prominent Notification Banners */}
+        {!timingStatus.isOpen && (
+          <div className="mb-4 p-4 rounded-2xl bg-amber-500/10 dark:bg-amber-500/15 border-2 border-amber-500/50 text-amber-900 dark:text-amber-200 space-y-1.5 shadow-sm">
+            <div className="flex items-center gap-2 font-bold text-xs sm:text-sm text-amber-800 dark:text-amber-300">
+              <Clock className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <span>Restaurant is Currently CLOSED (Operating Hours: 11:00 AM &ndash; 2:00 AM)</span>
+            </div>
+            <p className="text-xs leading-relaxed text-stone-700 dark:text-amber-100/90">
+              Our kitchen closes at 2:00 AM PKT and opens at 11:00 AM. Doorstep delivery is not dispatched during closed hours. You can still confirm your order now for priority 11:00 AM morning dispatch or WhatsApp our manager directly at 0325-9111555.
+            </p>
+          </div>
+        )}
+
+        {timingStatus.isOpen && timingStatus.isNearClosing && (
+          <div className="mb-4 p-4 rounded-2xl bg-orange-500/10 dark:bg-orange-500/15 border-2 border-orange-500/50 text-orange-950 dark:text-orange-200 space-y-1.5 shadow-sm">
+            <div className="flex items-center gap-2 font-bold text-xs sm:text-sm text-orange-800 dark:text-orange-300">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-orange-600 dark:text-orange-400" />
+              <span>Late-Night Kitchen Cutoff Notice (30&ndash;40 min to 2:00 AM)</span>
+            </div>
+            <p className="text-xs leading-relaxed text-stone-700 dark:text-orange-100/90">
+              Online order status tracking is active, but same-night doorstep delivery cannot be dispatched after 2:00 AM closing. Orders placed now will be scheduled for priority fulfillment or available for immediate express counter takeaway.
+            </p>
+          </div>
+        )}
 
         {/* Order Mode Badge */}
         <div className="flex items-center gap-2 p-2.5 rounded-xl bg-stone-100 dark:bg-stone-800/60 border border-stone-200 dark:border-stone-700/60 text-xs mb-4">
@@ -123,7 +164,7 @@ export const CheckoutModal: React.FC = () => {
         </div>
 
         {/* Form */}
-        <form onSubmit={(e) => handleSubmit(e, false)} className="space-y-4">
+        <form onSubmit={(e) => handleSubmit(e, false)} className="space-y-3.5">
           
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
@@ -180,7 +221,7 @@ export const CheckoutModal: React.FC = () => {
                 type="text"
                 value={tableNumber}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="e.g. Table 12 or Party of 6"
+                placeholder="e.g. Table 12 or Family Hall"
                 className="w-full px-3.5 py-2 text-xs rounded-xl border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
             </div>

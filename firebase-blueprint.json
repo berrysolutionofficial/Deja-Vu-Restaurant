@@ -1,0 +1,52 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Registered customer profile for Deja Vu Restaurant",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "maxLength": 150 },
+        "photoURL": { "type": "string", "maxLength": 500 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "addresses": { "type": "array" },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["uid", "email"]
+    },
+    "CustomerOrder": {
+      "title": "CustomerOrder",
+      "description": "Food order record placed by a customer",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "orderNumber": { "type": "string", "maxLength": 30 },
+        "customerName": { "type": "string", "maxLength": 100 },
+        "customerPhone": { "type": "string", "maxLength": 30 },
+        "deliveryAddress": { "type": "string", "maxLength": 300 },
+        "orderType": { "type": "string", "maxLength": 20 },
+        "subtotal": { "type": "number" },
+        "deliveryFee": { "type": "number" },
+        "total": { "type": "number" },
+        "status": { "type": "string", "maxLength": 30 },
+        "paymentMethod": { "type": "string", "maxLength": 20 },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "items": { "type": "array" }
+      },
+      "required": ["id", "orderNumber", "total", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Customer account details and saved delivery addresses"
+    },
+    "/orders/{orderId}": {
+      "schema": "CustomerOrder",
+      "description": "Orders placed by customers for dine-in, takeaway, and delivery"
+    }
+  }
+}

@@ -41,6 +41,8 @@ export interface Order {
   specialNotes?: string;
   paymentMethod: 'cod' | 'online' | 'cash';
   estimatedDeliveryMinutes: number;
+  userId?: string;
+  customerEmail?: string;
 }
 
 export interface CustomerUser {
@@ -51,3 +53,5 @@ export interface CustomerUser {
   avatar?: string;
   addresses: string[];
 }
+
+export type TimingSimulationMode = 'live' | 'open' | 'near-closing' | 'closed';

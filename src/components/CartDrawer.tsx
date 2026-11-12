@@ -18,6 +18,7 @@ export const CartDrawer: React.FC = () => {
     selectedArea,
     setIsLocationModalOpen,
     setIsCheckoutModalOpen,
+    timingStatus,
   } = useRestaurant();
 
   if (!isCartDrawerOpen) return null;
@@ -79,6 +80,21 @@ export const CartDrawer: React.FC = () => {
               Change
             </button>
           </div>
+
+          {/* Operating Hours Alert if Closed or Near Closing */}
+          {!timingStatus.isOpen && (
+            <div className="px-4 py-2.5 bg-amber-500/15 dark:bg-amber-500/20 border-b border-amber-500/30 text-[11px] text-amber-900 dark:text-amber-200 flex items-start gap-2">
+              <span className="font-bold shrink-0 mt-0.5">⚠️ Closed:</span>
+              <span>Kitchen is offline (Hours: 11:00 AM &ndash; 2:00 AM PKT). Doorstep delivery will resume at 11:00 AM.</span>
+            </div>
+          )}
+
+          {timingStatus.isOpen && timingStatus.isNearClosing && (
+            <div className="px-4 py-2.5 bg-orange-500/15 dark:bg-orange-500/20 border-b border-orange-500/30 text-[11px] text-orange-900 dark:text-orange-200 flex items-start gap-2">
+              <span className="font-bold shrink-0 mt-0.5">⏱️ Cutoff:</span>
+              <span>Orders after 1:20 AM can be tracked, but live doorstep delivery stops at 2:00 AM closing.</span>
+            </div>
+          )}
 
           {/* Cart Items List */}
           <div className="flex-1 overflow-y-auto px-4 sm:px-5 py-4 space-y-3">

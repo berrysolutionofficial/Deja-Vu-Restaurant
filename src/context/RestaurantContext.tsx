@@ -1,8 +1,12 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { MenuItem, MENU_ITEMS } from '../data/menuData';
-import { KarachiArea, KARACHI_AREAS, calculateDeliveryFee, RESTAURANT_LOCATION } from '../data/karachiAreas';
-import { CartItem, FlyingItemData, Order, OrderType, CustomerUser } from '../types';
+import { KarachiArea, KARACHI_AREAS } from '../data/karachiAreas';
+import { CartItem, FlyingItemData, Order, OrderType, CustomerUser, TimingSimulationMode } from '../types';
 import { playCartChime } from '../utils/audio';
+import { auth, db, googleProvider, signInWithPopup, signOut } from '../lib/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
+import { doc, getDoc, setDoc, collection, query, where, onSnapshot } from 'firebase/firestore';
+import { checkRestaurantTiming, RestaurantTimingStatus } from '../utils/timing';
 
 interface RestaurantContextType {
   // Theme
@@ -48,12 +52,22 @@ interface RestaurantContextType {
   activeTrackingOrder: Order | null;
   setActiveTrackingOrder: (order: Order | null) => void;
 
-  // User & Orders
+  // User & Real Firebase Authentication
   user: CustomerUser | null;
-  loginWithGoogle: () => void;
-  logout: () => void;
+  isAuthLoading: boolean;
+  authError: string | null;
+  loginWithGoogle: () => Promise<void>;
+  loginWithEmailMock: (email: string) => void;
+  logout: () => Promise<void>;
+
+  // Orders
   orders: Order[];
-  placeOrder: (orderData: Partial<Order>) => Order;
+  placeOrder: (orderData: Partial<Order>) => Promise<Order>;
+
+  // Operating Hours & Timing Rules
+  timingStatus: RestaurantTimingStatus;
+  timingSimulation: TimingSimulationMode;
+  setTimingSimulation: (mode: TimingSimulationMode) => void;
 }
 
 const RestaurantContext = createContext<RestaurantContextType | undefined>(undefined);
@@ -79,7 +93,35 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
   };
 
-  // 2. Location & Order Type State
+  // 2. Restaurant Operating Hours & Timing Rules (11:00 AM to 2:00 AM PKT)
+  const [timingSimulation, setTimingSimulation] = useState<TimingSimulationMode>('live');
+  const [timingStatus, setTimingStatus] = useState<RestaurantTimingStatus>(() => {
+    return checkRestaurantTiming();
+  });
+
+  useEffect(() => {
+    const updateTiming = () => {
+      if (timingSimulation === 'closed') {
+        // 4:00 AM (Closed)
+        setTimingStatus(checkRestaurantTiming(4, 0));
+      } else if (timingSimulation === 'near-closing') {
+        // 1:35 AM (Near Closing / Cutoff)
+        setTimingStatus(checkRestaurantTiming(1, 35));
+      } else if (timingSimulation === 'open') {
+        // 8:00 PM (Peak Dinner)
+        setTimingStatus(checkRestaurantTiming(20, 0));
+      } else {
+        // Live Real Karachi Time
+        setTimingStatus(checkRestaurantTiming());
+      }
+    };
+
+    updateTiming();
+    const interval = setInterval(updateTiming, 20000);
+    return () => clearInterval(interval);
+  }, [timingSimulation]);
+
+  // 3. Location & Order Type State
   const [orderType, setOrderType] = useState<OrderType>('delivery');
   const [selectedArea, setSelectedArea] = useState<KarachiArea>(() => {
     const savedAreaId = localStorage.getItem('dejavu_selected_area');
@@ -93,9 +135,8 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
   const [isDetectingLocation, setIsDetectingLocation] = useState<boolean>(false);
   const [locationError, setLocationError] = useState<string | null>(null);
 
-  // 3. Modals State
+  // 4. Modals State
   const [isLocationModalOpen, setIsLocationModalOpen] = useState<boolean>(() => {
-    // Show location modal on initial visit if not chosen yet
     return !localStorage.getItem('dejavu_area_chosen');
   });
   const [isCartDrawerOpen, setIsCartDrawerOpen] = useState<boolean>(false);
@@ -104,29 +145,18 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
   const [isDashboardOpen, setIsDashboardOpen] = useState<boolean>(false);
   const [activeTrackingOrder, setActiveTrackingOrder] = useState<Order | null>(null);
 
-  // 4. Cart State with Fresh Image Synchronization
+  // 5. Cart State with Fresh Image Synchronization
   const [cart, setCart] = useState<CartItem[]>(() => {
     try {
       const saved = localStorage.getItem('dejavu_cart');
       if (!saved) return [];
       const parsed: CartItem[] = JSON.parse(saved);
-      // Synchronize with fresh menu items so images and details are 100% up to date
       return parsed.map(c => {
         const freshItem = MENU_ITEMS.find(m => m.id === c.item.id);
         if (freshItem) {
           return {
             ...c,
             item: freshItem
-          };
-        }
-        // Sanitize any stale /src/ prefix if present
-        if (c.item.image && c.item.image.startsWith('/src/assets/')) {
-          return {
-            ...c,
-            item: {
-              ...c.item,
-              image: c.item.image.replace('/src/assets/', '/assets/')
-            }
           };
         }
         return c;
@@ -143,10 +173,10 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
     localStorage.setItem('dejavu_cart', JSON.stringify(cart));
   }, [cart]);
 
-  // Delivery Fee calculation (Only applies to delivery orderType)
+  // Delivery Fee calculation
   const deliveryFee = orderType === 'delivery' ? selectedArea.deliveryFee : 0;
 
-  // 5. User Profile State
+  // 6. User Profile & Real Google Firebase Authentication State
   const [user, setUser] = useState<CustomerUser | null>(() => {
     try {
       const saved = localStorage.getItem('dejavu_customer_user');
@@ -155,35 +185,138 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
       return null;
     }
   });
+  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
-  const loginWithGoogle = () => {
-    const mockUser: CustomerUser = {
-      id: 'cust_' + Math.random().toString(36).substring(2, 9),
-      name: 'Faizan Sheikh',
-      email: 'faizan.customer@gmail.com',
-      phone: '0300-1234567',
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
-      addresses: [
-        'House B-14, Block 1, Gulistan-e-Johar, Karachi',
-        'Office # 402, Business Avenue, Shahrah-e-Faisal'
-      ]
+  // Firebase Auth State Listener
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      if (fbUser) {
+        try {
+          const userRef = doc(db, 'users', fbUser.uid);
+          const snap = await getDoc(userRef);
+          if (snap.exists()) {
+            const data = snap.data() as CustomerUser;
+            setUser(data);
+            localStorage.setItem('dejavu_customer_user', JSON.stringify(data));
+          } else {
+            const newUser: CustomerUser = {
+              id: fbUser.uid,
+              name: fbUser.displayName || 'Valued Customer',
+              email: fbUser.email || '',
+              phone: fbUser.phoneNumber || '0325-9111555',
+              avatar: fbUser.photoURL || undefined,
+              addresses: ['Plot # B-54/13, Johar Hill Rd, Block 1, Karachi']
+            };
+            await setDoc(userRef, {
+              ...newUser,
+              createdAt: new Date().toISOString(),
+              lastLoginAt: new Date().toISOString()
+            });
+            setUser(newUser);
+            localStorage.setItem('dejavu_customer_user', JSON.stringify(newUser));
+          }
+        } catch (err) {
+          console.warn("Firestore user sync error (using local profile):", err);
+          const fallbackUser: CustomerUser = {
+            id: fbUser.uid,
+            name: fbUser.displayName || 'Valued Customer',
+            email: fbUser.email || '',
+            phone: '0325-9111555',
+            avatar: fbUser.photoURL || undefined,
+            addresses: []
+          };
+          setUser(fallbackUser);
+          localStorage.setItem('dejavu_customer_user', JSON.stringify(fallbackUser));
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Real Google Sign In via Firebase popup
+  const loginWithGoogle = async () => {
+    setIsAuthLoading(true);
+    setAuthError(null);
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const fbUser = result.user;
+      const userRef = doc(db, 'users', fbUser.uid);
+
+      let customerProfile: CustomerUser;
+      try {
+        const snap = await getDoc(userRef);
+        if (snap.exists()) {
+          customerProfile = snap.data() as CustomerUser;
+        } else {
+          customerProfile = {
+            id: fbUser.uid,
+            name: fbUser.displayName || 'Valued Customer',
+            email: fbUser.email || '',
+            phone: '0325-9111555',
+            avatar: fbUser.photoURL || undefined,
+            addresses: ['Plot # B-54/13, Johar Hill Rd, Block 1, Karachi']
+          };
+          await setDoc(userRef, {
+            ...customerProfile,
+            createdAt: new Date().toISOString(),
+            lastLoginAt: new Date().toISOString()
+          });
+        }
+      } catch {
+        customerProfile = {
+          id: fbUser.uid,
+          name: fbUser.displayName || 'Valued Customer',
+          email: fbUser.email || '',
+          phone: '0325-9111555',
+          avatar: fbUser.photoURL || undefined,
+          addresses: ['Plot # B-54/13, Johar Hill Rd, Block 1, Karachi']
+        };
+      }
+
+      setUser(customerProfile);
+      localStorage.setItem('dejavu_customer_user', JSON.stringify(customerProfile));
+      setIsAuthModalOpen(false);
+    } catch (err: unknown) {
+      console.error('Google Sign In Error:', err);
+      const message = err instanceof Error ? err.message : 'Google sign-in was interrupted. Please try again.';
+      setAuthError(message);
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
+
+  const loginWithEmailMock = (emailInput: string) => {
+    const customUser: CustomerUser = {
+      id: 'cust_' + Date.now(),
+      name: emailInput.split('@')[0].replace('.', ' ').toUpperCase(),
+      email: emailInput,
+      phone: '0325-9111555',
+      avatar: undefined,
+      addresses: ['Johar Hill Rd, Block 1, Karachi']
     };
-    setUser(mockUser);
-    localStorage.setItem('dejavu_customer_user', JSON.stringify(mockUser));
+    setUser(customUser);
+    localStorage.setItem('dejavu_customer_user', JSON.stringify(customUser));
     setIsAuthModalOpen(false);
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.warn("SignOut error:", err);
+    }
     setUser(null);
     localStorage.removeItem('dejavu_customer_user');
+    setIsDashboardOpen(false);
   };
 
-  // 6. Orders State
+  // 7. Orders State (Synced locally and with Firestore)
   const [orders, setOrders] = useState<Order[]>(() => {
     try {
       const saved = localStorage.getItem('dejavu_orders');
       if (saved) return JSON.parse(saved);
-      // Pre-seed an example completed order for rich experience
       return [
         {
           id: 'ord_demo_101',
@@ -192,7 +325,7 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
           items: [
             {
               cartItemId: 'item_1',
-              item: MENU_ITEMS[0], // Deja Vu Special Steak
+              item: MENU_ITEMS[0],
               quantity: 1,
               unitPrice: 2563,
               totalPrice: 2563
@@ -211,9 +344,9 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
           subtotal: 2743,
           total: 2833,
           status: 'delivered',
-          customerName: 'Faizan Sheikh',
-          customerPhone: '0300-1234567',
-          deliveryAddress: 'Apartment 304, Johar Heights, Block 1, Gulistan-e-Johar, Karachi',
+          customerName: 'Valued Guest',
+          customerPhone: '0325-9111555',
+          deliveryAddress: 'Johar Heights, Block 1, Gulistan-e-Johar, Karachi',
           paymentMethod: 'cod',
           estimatedDeliveryMinutes: 25
         }
@@ -227,7 +360,43 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
     localStorage.setItem('dejavu_orders', JSON.stringify(orders));
   }, [orders]);
 
-  // Simulate live order progression for active orders
+  // Sync user orders from Firestore when logged in
+  useEffect(() => {
+    if (!user?.id) return;
+
+    try {
+      const ordersRef = collection(db, 'orders');
+      const q = query(ordersRef, where('userId', '==', user.id));
+
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        if (!snapshot.empty) {
+          const remoteOrders: Order[] = [];
+          snapshot.forEach(docSnap => {
+            remoteOrders.push(docSnap.data() as Order);
+          });
+          // Merge with local orders, prioritizing newer
+          setOrders(prev => {
+            const map = new Map<string, Order>();
+            remoteOrders.forEach(o => map.set(o.id, o));
+            prev.forEach(o => {
+              if (!map.has(o.id)) map.set(o.id, o);
+            });
+            return Array.from(map.values()).sort(
+              (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+            );
+          });
+        }
+      }, (err) => {
+        console.warn("Firestore orders listener warning:", err);
+      });
+
+      return () => unsubscribe();
+    } catch (e) {
+      console.warn("Could not attach firestore listener:", e);
+    }
+  }, [user?.id]);
+
+  // Simulate kitchen progress
   useEffect(() => {
     const timer = setInterval(() => {
       setOrders(prevOrders => {
@@ -260,7 +429,7 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
     }
   }, [orders, activeTrackingOrder]);
 
-  // 7. Add to Cart with Slow Smooth Parabolic Flying Animation (as in video)
+  // 8. Add to Cart with Slow Smooth Parabolic Flying Animation
   const addToCart = useCallback((
     item: MenuItem,
     portion?: { label: string; price: number },
@@ -269,7 +438,6 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
     const effectivePrice = portion ? portion.price : item.price;
     const cartItemId = `${item.id}-${portion?.label || 'default'}`;
 
-    // Target is the cart button in the header with id="navbar-cart-btn"
     const targetEl = document.getElementById('navbar-cart-btn');
 
     if (sourceEl && targetEl) {
@@ -296,22 +464,18 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
         }
       ]);
 
-      // Remove the flying item after the 850ms slow smooth animation completes
       setTimeout(() => {
         setFlyingItems(prev => prev.filter(f => f.id !== flyId));
-        // Trigger cart icon wiggle
         setIsCartWiggling(true);
         playCartChime();
         setTimeout(() => setIsCartWiggling(false), 700);
       }, 850);
     } else {
-      // Direct trigger
       setIsCartWiggling(true);
       playCartChime();
       setTimeout(() => setIsCartWiggling(false), 700);
     }
 
-    // Update cart state
     setCart(prev => {
       const existingIndex = prev.findIndex(c => c.cartItemId === cartItemId);
       if (existingIndex > -1) {
@@ -369,7 +533,7 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
   const cartCount = cart.reduce((acc, curr) => acc + curr.quantity, 0);
   const cartSubtotal = cart.reduce((acc, curr) => acc + curr.totalPrice, 0);
 
-  // 8. GPS Location Detection
+  // 9. GPS Location Detection
   const detectCurrentLocation = async (): Promise<string> => {
     setIsDetectingLocation(true);
     setLocationError(null);
@@ -387,7 +551,6 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
           setIsDetectingLocation(false);
           const { latitude, longitude } = position.coords;
 
-          // Find closest Karachi area in list
           let closest = KARACHI_AREAS[0];
           let minDistance = 999999;
 
@@ -418,8 +581,8 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
     });
   };
 
-  // 9. Place Order Handler
-  const placeOrder = (orderData: Partial<Order>): Order => {
+  // 10. Place Order Handler (Persisted to Firestore & local)
+  const placeOrder = async (orderData: Partial<Order>): Promise<Order> => {
     const randomCode = Math.floor(1000 + Math.random() * 9000);
     const newOrder: Order = {
       id: 'ord_' + Date.now(),
@@ -438,8 +601,20 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
       tableNumber: orderData.tableNumber || tableNumber,
       specialNotes: orderData.specialNotes || '',
       paymentMethod: orderData.paymentMethod || 'cod',
-      estimatedDeliveryMinutes: selectedArea.estimatedMinutes || 35
+      estimatedDeliveryMinutes: selectedArea.estimatedMinutes || 35,
+      userId: user?.id,
+      customerEmail: user?.email
     };
+
+    // Save to Firestore
+    try {
+      await setDoc(doc(db, 'orders', newOrder.id), {
+        ...newOrder,
+        timestamp: new Date().toISOString()
+      });
+    } catch (err) {
+      console.warn("Could not save order to Firestore directly (saved locally):", err);
+    }
 
     setOrders(prev => [newOrder, ...prev]);
     clearCart();
@@ -487,10 +662,16 @@ export const RestaurantProvider: React.FC<{ children: ReactNode }> = ({ children
         activeTrackingOrder,
         setActiveTrackingOrder,
         user,
+        isAuthLoading,
+        authError,
         loginWithGoogle,
+        loginWithEmailMock,
         logout,
         orders,
         placeOrder,
+        timingStatus,
+        timingSimulation,
+        setTimingSimulation,
       }}
     >
       {children}

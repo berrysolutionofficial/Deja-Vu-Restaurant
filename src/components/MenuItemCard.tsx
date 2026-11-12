@@ -68,6 +68,7 @@ export const MenuItemCard: React.FC<MenuItemCardProps> = ({ item }) => {
             alt={item.name}
             className="w-full h-full object-cover group-hover:scale-108 transition-transform duration-700 ease-out"
             loading="lazy"
+            decoding="async"
             onError={(e) => {
               (e.currentTarget as HTMLImageElement).src = '/assets/images/bbq_charcoal_platter_1794462153034.jpg';
             }}

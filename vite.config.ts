@@ -39,12 +39,15 @@ export default defineConfig(() => {
         devOptions: {
           enabled: true,
           type: 'module'
+        },
+        workbox: {
+          maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         }
       })
     ],
     resolve: {
       alias: {
-        '@': path.resolve(import.meta.dirname || __dirname, '.'),
+        '@': path.resolve(import.meta.dirname || process.cwd(), '.'),
       },
     },
     server: {
