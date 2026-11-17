@@ -2,51 +2,69 @@
   "entities": {
     "UserProfile": {
       "title": "UserProfile",
-      "description": "Registered customer profile for Deja Vu Restaurant",
+      "description": "Registered customer profile and loyalty wallet for Deja Vu Restaurant",
       "type": "object",
       "properties": {
         "uid": { "type": "string", "maxLength": 128 },
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 100 },
         "displayName": { "type": "string", "maxLength": 100 },
         "email": { "type": "string", "maxLength": 150 },
-        "photoURL": { "type": "string", "maxLength": 500 },
+        "avatar": { "type": "string", "maxLength": 500 },
         "phone": { "type": "string", "maxLength": 30 },
         "addresses": { "type": "array" },
+        "loyaltyPoints": { "type": "number" },
+        "totalPointsEarned": { "type": "number" },
+        "totalPointsRedeemed": { "type": "number" },
         "createdAt": { "type": "string", "maxLength": 50 },
+        "lastLoginAt": { "type": "string", "maxLength": 50 },
         "updatedAt": { "type": "string", "maxLength": 50 }
       },
-      "required": ["uid", "email"]
+      "required": ["uid", "email", "loyaltyPoints"]
     },
     "CustomerOrder": {
       "title": "CustomerOrder",
-      "description": "Food order record placed by a customer",
+      "description": "Food order record placed by a customer including loyalty points and review",
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 128 },
         "userId": { "type": "string", "maxLength": 128 },
         "orderNumber": { "type": "string", "maxLength": 30 },
         "customerName": { "type": "string", "maxLength": 100 },
+        "customerEmail": { "type": "string", "maxLength": 150 },
         "customerPhone": { "type": "string", "maxLength": 30 },
         "deliveryAddress": { "type": "string", "maxLength": 300 },
+        "tableNumber": { "type": "string", "maxLength": 50 },
+        "specialNotes": { "type": "string", "maxLength": 500 },
         "orderType": { "type": "string", "maxLength": 20 },
+        "area": { "type": "object" },
         "subtotal": { "type": "number" },
         "deliveryFee": { "type": "number" },
+        "loyaltyDiscount": { "type": "number" },
+        "pointsRedeemed": { "type": "number" },
+        "pointsEarned": { "type": "number" },
         "total": { "type": "number" },
         "status": { "type": "string", "maxLength": 30 },
         "paymentMethod": { "type": "string", "maxLength": 20 },
+        "estimatedDeliveryMinutes": { "type": "number" },
+        "rating": { "type": "number" },
+        "review": { "type": "string", "maxLength": 500 },
+        "reviewedAt": { "type": "string", "maxLength": 50 },
         "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 },
         "items": { "type": "array" }
       },
-      "required": ["id", "orderNumber", "total", "status"]
+      "required": ["id", "userId", "orderNumber", "total", "status"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": "UserProfile",
-      "description": "Customer account details and saved delivery addresses"
+      "description": "Customer account details, saved delivery addresses, and loyalty points wallet"
     },
     "/orders/{orderId}": {
       "schema": "CustomerOrder",
-      "description": "Orders placed by customers for dine-in, takeaway, and delivery"
+      "description": "Orders placed by customers with ratings, reviews, and loyalty point ledgers"
     }
   }
 }

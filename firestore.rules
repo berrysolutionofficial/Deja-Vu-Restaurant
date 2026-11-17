@@ -2,13 +2,21 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Global Deny All
+    // Global Safety Net: Default Deny All
     match /{document=**} {
       allow read, write: if false;
     }
 
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
     function isSignedIn() {
-      return request.auth != null;
+      return request.auth != null && request.auth.token.email_verified == true;
     }
 
     function isOwner(userId) {
@@ -16,28 +24,127 @@ service cloud.firestore {
     }
 
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
-    // Customer Users collection
+    function isValidUserCreate(data, userId) {
+      return data.keys().hasAll(['uid', 'email', 'loyaltyPoints', 'createdAt'])
+        && data.keys().hasOnly([
+          'uid', 'id', 'name', 'displayName', 'email', 'avatar',
+          'phone', 'addresses', 'loyaltyPoints', 'totalPointsEarned',
+          'totalPointsRedeemed', 'createdAt', 'lastLoginAt', 'updatedAt'
+        ])
+        && data.uid == userId
+        && data.email is string && data.email.size() <= 150
+        && (!('name' in data) || (data.name is string && data.name.size() <= 100))
+        && (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100))
+        && (!('phone' in data) || (data.phone is string && data.phone.size() <= 30))
+        && (!('avatar' in data) || (data.avatar is string && data.avatar.size() <= 500))
+        && (!('addresses' in data) || (data.addresses is list && data.addresses.size() <= 10))
+        && data.loyaltyPoints is number && data.loyaltyPoints == 0
+        && (!('totalPointsEarned' in data) || (data.totalPointsEarned is number && data.totalPointsEarned == 0))
+        && (!('totalPointsRedeemed' in data) || (data.totalPointsRedeemed is number && data.totalPointsRedeemed == 0))
+        && data.createdAt is string && data.createdAt.size() <= 50;
+    }
+
+    function isValidUserUpdate(data, prev, userId) {
+      return data.keys().hasAll(['uid', 'email', 'loyaltyPoints'])
+        && data.keys().hasOnly([
+          'uid', 'id', 'name', 'displayName', 'email', 'avatar',
+          'phone', 'addresses', 'loyaltyPoints', 'totalPointsEarned',
+          'totalPointsRedeemed', 'createdAt', 'lastLoginAt', 'updatedAt'
+        ])
+        && data.uid == prev.uid
+        && data.uid == userId
+        && data.email == prev.email
+        && (!('createdAt' in prev) || data.createdAt == prev.createdAt)
+        && (!('name' in data) || (data.name is string && data.name.size() <= 100))
+        && (!('phone' in data) || (data.phone is string && data.phone.size() <= 30))
+        && (!('avatar' in data) || (data.avatar is string && data.avatar.size() <= 500))
+        && (!('addresses' in data) || (data.addresses is list && data.addresses.size() <= 10))
+        && data.loyaltyPoints is number && data.loyaltyPoints >= 0
+        && (data.loyaltyPoints - prev.loyaltyPoints) <= 5000
+        && (!('totalPointsEarned' in data) || (data.totalPointsEarned is number && data.totalPointsEarned >= 0))
+        && (!('totalPointsRedeemed' in data) || (data.totalPointsRedeemed is number && data.totalPointsRedeemed >= 0));
+    }
+
+    function isValidOrderCreate(data, orderId) {
+      return data.keys().hasAll(['id', 'userId', 'orderNumber', 'total', 'status', 'createdAt', 'items'])
+        && data.keys().hasOnly([
+          'id', 'userId', 'orderNumber', 'customerName', 'customerEmail',
+          'customerPhone', 'deliveryAddress', 'tableNumber', 'specialNotes',
+          'orderType', 'area', 'subtotal', 'deliveryFee', 'loyaltyDiscount',
+          'pointsRedeemed', 'pointsEarned', 'total', 'status', 'paymentMethod',
+          'estimatedDeliveryMinutes', 'createdAt', 'updatedAt', 'items'
+        ])
+        && data.id == orderId
+        && data.orderNumber is string && data.orderNumber.size() <= 30
+        && data.userId is string && data.userId.size() <= 128
+        && (!('customerName' in data) || (data.customerName is string && data.customerName.size() <= 100))
+        && (!('customerEmail' in data) || (data.customerEmail is string && data.customerEmail.size() <= 150))
+        && (!('customerPhone' in data) || (data.customerPhone is string && data.customerPhone.size() <= 30))
+        && (!('deliveryAddress' in data) || (data.deliveryAddress is string && data.deliveryAddress.size() <= 300))
+        && (!('tableNumber' in data) || (data.tableNumber is string && data.tableNumber.size() <= 50))
+        && (!('specialNotes' in data) || (data.specialNotes is string && data.specialNotes.size() <= 500))
+        && (!('orderType' in data) || (data.orderType in ['delivery', 'takeaway', 'dine-in']))
+        && (!('subtotal' in data) || (data.subtotal is number && data.subtotal >= 0))
+        && (!('deliveryFee' in data) || (data.deliveryFee is number && data.deliveryFee >= 0))
+        && (!('loyaltyDiscount' in data) || (data.loyaltyDiscount is number && data.loyaltyDiscount >= 0))
+        && (!('pointsRedeemed' in data) || (data.pointsRedeemed is number && data.pointsRedeemed >= 0))
+        && (!('pointsEarned' in data) || (data.pointsEarned is number && data.pointsEarned >= 0 && data.pointsEarned <= 5000))
+        && data.total is number && data.total >= 0
+        && data.status == 'placed'
+        && (!('paymentMethod' in data) || (data.paymentMethod in ['cod', 'online', 'cash']))
+        && data.createdAt is string && data.createdAt.size() <= 50
+        && data.items is list && data.items.size() >= 1 && data.items.size() <= 50;
+    }
+
+    function isValidOrderUpdate(data, prev) {
+      return data.id == prev.id
+        && data.userId == prev.userId
+        && data.orderNumber == prev.orderNumber
+        && data.total == prev.total
+        && data.createdAt == prev.createdAt
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 50));
+    }
+
+    // Customer Users collection (Strict Owner-Only PII & Loyalty Wallet)
     match /users/{userId} {
-      allow read: if isOwner(userId);
-      allow create: if isOwner(userId) && request.resource.data.uid == userId;
-      allow update: if isOwner(userId) && request.resource.data.uid == userId;
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if false;
+      allow create: if isOwner(userId) && isValidId(userId) && isValidUserCreate(incoming(), userId);
+      allow update: if isOwner(userId) && isValidId(userId)
+                    && isValidUserUpdate(incoming(), existing(), userId)
+                    && incoming().diff(existing()).affectedKeys().hasOnly([
+                      'name', 'displayName', 'avatar', 'phone', 'addresses',
+                      'loyaltyPoints', 'totalPointsEarned', 'totalPointsRedeemed',
+                      'lastLoginAt', 'updatedAt'
+                    ]);
       allow delete: if false;
     }
 
     // Customer Orders collection
     match /orders/{orderId} {
-      allow read: if true; // Allows customers to track their order via order number / ID
-      allow create: if request.resource.data.id == orderId
-                    && request.resource.data.total is number
-                    && request.resource.data.total >= 0
-                    && request.resource.data.status is string;
-      allow update: if isSignedIn() && (
-        resource.data.userId == request.auth.uid ||
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+      allow get: if isSignedIn() && isValidId(orderId) && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && existing().userId == request.auth.uid;
+      allow create: if isValidId(orderId) && isValidOrderCreate(incoming(), orderId) && (
+        (isSignedIn() && incoming().userId == request.auth.uid) ||
+        (!isSignedIn() && incoming().userId == 'guest'
+          && (!('pointsRedeemed' in incoming()) || incoming().pointsRedeemed == 0)
+          && (!('loyaltyDiscount' in incoming()) || incoming().loyaltyDiscount == 0))
       );
+      allow update: if isSignedIn() && isValidId(orderId) && existing().userId == request.auth.uid
+                    && isValidOrderUpdate(incoming(), existing()) && (
+                      // Action 1: Kitchen/Delivery status transition (locked once delivered)
+                      (existing().status != 'delivered'
+                        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+                        && incoming().status in ['placed', 'grilling', 'out_for_delivery', 'delivered']) ||
+                      // Action 2: Customer Order Rating & Review
+                      (incoming().diff(existing()).affectedKeys().hasOnly(['rating', 'review', 'reviewedAt', 'updatedAt'])
+                        && incoming().rating is number && incoming().rating >= 1 && incoming().rating <= 5
+                        && incoming().review is string && incoming().review.size() <= 500
+                        && incoming().reviewedAt is string && incoming().reviewedAt.size() <= 50)
+                    );
       allow delete: if false;
     }
   }

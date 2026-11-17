@@ -148,11 +148,25 @@ export const OrderTrackingModal: React.FC = () => {
             ))}
           </div>
 
-          <div className="pt-2 border-t border-stone-200 dark:border-stone-700 flex justify-between font-bold text-xs text-stone-900 dark:text-stone-100">
-            <span>Total Bill Paid ({order.paymentMethod.toUpperCase()})</span>
-            <span className="text-[#c99a2c] dark:text-amber-400 font-extrabold tabular-nums">
-              {formatPrice(order.total)}
-            </span>
+          <div className="pt-2 border-t border-stone-200 dark:border-stone-700 space-y-1">
+            {typeof order.loyaltyDiscount === 'number' && order.loyaltyDiscount > 0 && (
+              <div className="flex justify-between text-xs text-emerald-600 dark:text-emerald-400 font-semibold">
+                <span>Loyalty Discount ({order.pointsRedeemed || 0} pts)</span>
+                <span className="tabular-nums">- {formatPrice(order.loyaltyDiscount)}</span>
+              </div>
+            )}
+            <div className="flex justify-between font-bold text-xs text-stone-900 dark:text-stone-100">
+              <span>Total Bill Paid ({order.paymentMethod.toUpperCase()})</span>
+              <span className="text-[#c99a2c] dark:text-amber-400 font-extrabold tabular-nums">
+                {formatPrice(order.total)}
+              </span>
+            </div>
+            {typeof order.pointsEarned === 'number' && order.pointsEarned > 0 && (
+              <div className="flex justify-between text-[11px] text-amber-700 dark:text-amber-300 font-bold">
+                <span>Loyalty Points Earned</span>
+                <span>+{order.pointsEarned} pts</span>
+              </div>
+            )}
           </div>
         </div>
 

@@ -171,6 +171,7 @@ export const Navbar: React.FC<NavbarProps> = () => {
                 type="button"
                 onClick={() => setIsDashboardOpen(true)}
                 className="flex items-center gap-1.5 p-1 sm:px-2.5 sm:py-1.5 rounded-xl bg-stone-100 hover:bg-stone-200 dark:bg-stone-900 dark:hover:bg-stone-800 border border-stone-200 dark:border-amber-500/50 text-stone-800 dark:text-amber-200 text-xs font-semibold transition-all shrink-0"
+                title="Open Customer Dashboard & Loyalty Wallet"
               >
                 {user.avatar ? (
                   <img
@@ -183,6 +184,9 @@ export const Navbar: React.FC<NavbarProps> = () => {
                   <User className="w-4 h-4 text-amber-500" />
                 )}
                 <span className="hidden sm:inline truncate max-w-[70px]">{user.name.split(' ')[0]}</span>
+                <span className="px-1.5 py-0.5 rounded-md bg-amber-500/20 text-[#a87a1c] dark:text-amber-300 text-[10px] font-extrabold tabular-nums">
+                  {user.loyaltyPoints || 0} pts
+                </span>
               </button>
             ) : (
               <button

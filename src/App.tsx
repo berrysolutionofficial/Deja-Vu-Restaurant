@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { RestaurantProvider, useRestaurant } from './context/RestaurantContext';
 import { Navbar } from './components/Navbar';
 import { HeroCarousel } from './components/HeroCarousel';
@@ -14,13 +14,19 @@ import { OrderTrackingModal } from './components/OrderTrackingModal';
 import { CustomerAuthModal } from './components/CustomerAuthModal';
 import { CustomerDashboardModal } from './components/CustomerDashboardModal';
 import { FloatingWhatsApp } from './components/FloatingWhatsApp';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { SplashScreen } from './components/SplashScreen';
 
 const RestaurantApp: React.FC = () => {
   const { flyingItems } = useRestaurant();
+  const [showSplash, setShowSplash] = useState(true);
 
   return (
     <div className="min-h-screen bg-[#fcf9f5] dark:bg-[#0d0d11] text-stone-900 dark:text-stone-100 transition-colors duration-300">
       
+      {/* Stylish Animated Splash / Loading Screen with Zoom-in Bouncing Logo & Celebration Fireworks */}
+      {showSplash && <SplashScreen onComplete={() => setShowSplash(false)} />}
+
       {/* Top Sticky Navigation */}
       <Navbar />
 
@@ -45,8 +51,8 @@ const RestaurantApp: React.FC = () => {
       {/* Floating WhatsApp Button on the Bottom LEFT */}
       <FloatingWhatsApp />
 
-      {/* Modals & Slide-overs */}
-      <LocationModal />
+      {/* Modals & Slide-overs (LocationModal waits until splash finishes) */}
+      {!showSplash && <LocationModal />}
       <CartDrawer />
       <CheckoutModal />
       <OrderTrackingModal />
@@ -58,8 +64,10 @@ const RestaurantApp: React.FC = () => {
 
 export default function App() {
   return (
-    <RestaurantProvider>
-      <RestaurantApp />
-    </RestaurantProvider>
+    <ErrorBoundary>
+      <RestaurantProvider>
+        <RestaurantApp />
+      </RestaurantProvider>
+    </ErrorBoundary>
   );
 }

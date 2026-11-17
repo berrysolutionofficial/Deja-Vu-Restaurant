@@ -27,11 +27,15 @@ export interface Order {
   id: string;
   orderNumber: string;
   createdAt: string;
+  updatedAt?: string;
   items: CartItem[];
   orderType: OrderType;
   area?: KarachiArea;
   deliveryFee: number;
   subtotal: number;
+  loyaltyDiscount?: number;
+  pointsRedeemed?: number;
+  pointsEarned?: number;
   total: number;
   status: 'placed' | 'grilling' | 'out_for_delivery' | 'delivered';
   customerName: string;
@@ -43,15 +47,24 @@ export interface Order {
   estimatedDeliveryMinutes: number;
   userId?: string;
   customerEmail?: string;
+  rating?: number;
+  review?: string;
+  reviewedAt?: string;
 }
 
 export interface CustomerUser {
   id: string;
+  uid?: string;
   name: string;
+  displayName?: string;
   email: string;
   phone: string;
   avatar?: string;
   addresses: string[];
+  loyaltyPoints: number;
+  totalPointsEarned: number;
+  totalPointsRedeemed: number;
+  createdAt?: string;
 }
 
 export type TimingSimulationMode = 'live' | 'open' | 'near-closing' | 'closed';

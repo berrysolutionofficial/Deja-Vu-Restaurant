@@ -1,7 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { useRestaurant } from '../context/RestaurantContext';
+import {
+  useRestaurant,
+  LOYALTY_EARN_RATE_RS,
+  LOYALTY_POINT_VALUE_RS,
+} from '../context/RestaurantContext';
 import { formatPrice } from '../utils/format';
-import { X, Bike, ShoppingBag, Utensils, ArrowRight, MessageSquare, ShieldCheck, Clock, AlertTriangle } from 'lucide-react';
+import {
+  X,
+  Bike,
+  ShoppingBag,
+  Utensils,
+  ArrowRight,
+  MessageSquare,
+  ShieldCheck,
+  Clock,
+  AlertTriangle,
+  Award,
+  Sparkles,
+} from 'lucide-react';
 
 export const CheckoutModal: React.FC = () => {
   const {
@@ -16,6 +32,7 @@ export const CheckoutModal: React.FC = () => {
     tableNumber,
     placeOrder,
     user,
+    setIsAuthModalOpen,
     timingStatus,
   } = useRestaurant();
 
@@ -24,9 +41,10 @@ export const CheckoutModal: React.FC = () => {
   const [address, setAddress] = useState(customAddress || '');
   const [notes, setNotes] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'cod' | 'online' | 'cash'>('cod');
+  const [pointsToRedeem, setPointsToRedeem] = useState<number>(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Sync user info if user logs in while modal is open
+  // Sync user info and custom address when modal opens or user signs in
   useEffect(() => {
     if (user?.name && !customerName) {
       setCustomerName(user.name);
@@ -34,20 +52,38 @@ export const CheckoutModal: React.FC = () => {
     if (user?.phone && !customerPhone) {
       setCustomerPhone(user.phone);
     }
-  }, [user]);
+    if (customAddress && !address) {
+      setAddress(customAddress);
+    }
+  }, [user, customAddress, isCheckoutModalOpen]);
+
+  // Reset redeemed points if cart changes below threshold
+  const maxRedeemablePoints = user
+    ? Math.min(user.loyaltyPoints || 0, Math.floor(cartSubtotal / LOYALTY_POINT_VALUE_RS))
+    : 0;
+
+  useEffect(() => {
+    if (pointsToRedeem > maxRedeemablePoints) {
+      setPointsToRedeem(maxRedeemablePoints);
+    }
+  }, [maxRedeemablePoints, pointsToRedeem]);
 
   if (!isCheckoutModalOpen) return null;
 
-  const total = cartSubtotal + (orderType === 'delivery' ? deliveryFee : 0);
+  const loyaltyDiscount = pointsToRedeem * LOYALTY_POINT_VALUE_RS;
+  const discountedSubtotal = Math.max(0, cartSubtotal - loyaltyDiscount);
+  const effectiveDeliveryFee = orderType === 'delivery' ? deliveryFee : 0;
+  const total = discountedSubtotal + effectiveDeliveryFee;
+  const estimatedPointsToEarn = user
+    ? Math.max(1, Math.floor(discountedSubtotal / LOYALTY_EARN_RATE_RS))
+    : 0;
 
   const handleSubmit = async (e: React.FormEvent, sendToWhatsapp: boolean) => {
     e.preventDefault();
     if (!customerName.trim() || !customerPhone.trim()) {
-      alert('Please provide your full name and phone number to confirm your order.');
       return;
     }
     if (orderType === 'delivery' && !address.trim()) {
-      alert('Please enter your complete street / house address for delivery.');
       return;
     }
 
@@ -60,26 +96,36 @@ export const CheckoutModal: React.FC = () => {
         deliveryAddress: address,
         specialNotes: notes,
         paymentMethod,
+        pointsToRedeem,
       });
 
       if (sendToWhatsapp) {
-        // Build clean WhatsApp message to 0325-9111555
         const itemsList = cart
-          .map(c => `• ${c.quantity}x ${c.item.name}${c.portion ? ` (${c.portion.label})` : ''} - ${formatPrice(c.totalPrice)}`)
+          .map(
+            (c) =>
+              `• ${c.quantity}x ${c.item.name}${c.portion ? ` (${c.portion.label})` : ''} - ${formatPrice(c.totalPrice)}`
+          )
           .join('%0A');
 
-        const waText = 
+        const waText =
           `*NEW ORDER FROM DEJA VU WEBSITE*%0A` +
           `*Order ID:* ${createdOrder.orderNumber}%0A` +
           `*Order Type:* ${orderType.toUpperCase()}%0A` +
           `*Customer Name:* ${encodeURIComponent(customerName)}%0A` +
           `*Phone:* ${encodeURIComponent(customerPhone)}%0A` +
-          (orderType === 'delivery' ? `*Area:* ${encodeURIComponent(selectedArea.name)} (~${selectedArea.distanceKm} km)%0A*Address:* ${encodeURIComponent(address)}%0A` : '') +
-          (orderType === 'dine-in' ? `*Table/Party:* ${encodeURIComponent(tableNumber || 'Seated')} %0A` : '') +
+          (orderType === 'delivery'
+            ? `*Area:* ${encodeURIComponent(selectedArea.name)} (~${selectedArea.distanceKm} km)%0A*Address:* ${encodeURIComponent(address)}%0A`
+            : '') +
+          (orderType === 'dine-in'
+            ? `*Table/Party:* ${encodeURIComponent(tableNumber || 'Seated')}%0A`
+            : '') +
           `------------------------%0A` +
           `*ITEMS:*%0A${itemsList}%0A` +
           `------------------------%0A` +
           `*Subtotal:* ${formatPrice(cartSubtotal)}%0A` +
+          (loyaltyDiscount > 0
+            ? `*Loyalty Discount (${pointsToRedeem} pts):* -${formatPrice(loyaltyDiscount)}%0A`
+            : '') +
           (orderType === 'delivery' ? `*Delivery Fee:* ${formatPrice(deliveryFee)}%0A` : '') +
           `*TOTAL AMOUNT:* ${formatPrice(total)}%0A` +
           `*Payment Method:* ${paymentMethod.toUpperCase()}%0A` +
@@ -88,6 +134,7 @@ export const CheckoutModal: React.FC = () => {
 
         window.open(`https://wa.me/923259111555?text=${waText}`, '_blank');
       }
+      setPointsToRedeem(0);
     } catch (err) {
       console.error(err);
     } finally {
@@ -240,17 +287,83 @@ export const CheckoutModal: React.FC = () => {
             />
           </div>
 
+          {/* Loyalty Points Redemption Section */}
+          {user ? (
+            <div className="p-3.5 rounded-2xl bg-amber-500/10 dark:bg-amber-500/10 border border-amber-500/35 space-y-2.5 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 font-bold text-amber-800 dark:text-amber-300">
+                  <Award className="w-4 h-4 text-[#c99a2c] dark:text-amber-400 shrink-0" />
+                  <span>Loyalty Points ({user.loyaltyPoints || 0} pts available)</span>
+                </div>
+                {maxRedeemablePoints > 0 && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPointsToRedeem(pointsToRedeem === maxRedeemablePoints ? 0 : maxRedeemablePoints)
+                    }
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-colors ${
+                      pointsToRedeem > 0
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-linear-to-r from-[#f0d06f] to-[#c99a2c] text-stone-950'
+                    }`}
+                  >
+                    {pointsToRedeem === maxRedeemablePoints
+                      ? 'Applied Max ✓'
+                      : `Redeem ${maxRedeemablePoints} pts (-${formatPrice(maxRedeemablePoints * LOYALTY_POINT_VALUE_RS)})`}
+                  </button>
+                )}
+              </div>
+
+              {maxRedeemablePoints > 0 ? (
+                <div className="space-y-1">
+                  <input
+                    type="range"
+                    min={0}
+                    max={maxRedeemablePoints}
+                    value={pointsToRedeem}
+                    onChange={(e) => setPointsToRedeem(Number(e.target.value))}
+                    className="w-full accent-amber-500 cursor-pointer"
+                  />
+                  <div className="flex justify-between text-[11px] text-stone-600 dark:text-stone-400">
+                    <span>Redeeming: <strong className="text-stone-900 dark:text-stone-100">{pointsToRedeem} pts</strong></span>
+                    <span>Discount: <strong className="text-emerald-600 dark:text-emerald-400">-{formatPrice(loyaltyDiscount)}</strong></span>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[11px] text-stone-600 dark:text-stone-400">
+                  You&apos;ll earn <strong className="text-amber-700 dark:text-amber-300">+{estimatedPointsToEarn} loyalty points</strong> with this order to redeem on your next meal!
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="p-3 rounded-2xl bg-stone-100 dark:bg-stone-800/70 border border-stone-200 dark:border-stone-700 flex items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 text-stone-600 dark:text-stone-300">
+                <Sparkles className="w-4 h-4 text-[#c99a2c] shrink-0" />
+                <span>Sign in with Google to earn &amp; redeem loyalty points!</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAuthModalOpen(true)}
+                className="shrink-0 px-3 py-1 rounded-lg bg-linear-to-r from-[#f0d06f] to-[#c99a2c] text-stone-950 font-extrabold text-[11px]"
+              >
+                Sign In
+              </button>
+            </div>
+          )}
+
           {/* Payment Method Selector */}
           <div>
             <label className="block text-xs font-semibold text-stone-600 dark:text-stone-300 mb-1.5">
               Payment Method
             </label>
             <div className="grid grid-cols-2 gap-2">
-              <label className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer text-xs transition-colors ${
-                paymentMethod === 'cod'
-                  ? 'border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-300 font-bold'
-                  : 'border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-300'
-              }`}>
+              <label
+                className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer text-xs transition-colors ${
+                  paymentMethod === 'cod'
+                    ? 'border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-300 font-bold'
+                    : 'border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-300'
+                }`}
+              >
                 <input
                   type="radio"
                   name="payment"
@@ -261,11 +374,13 @@ export const CheckoutModal: React.FC = () => {
                 <span>Cash on Delivery (COD)</span>
               </label>
 
-              <label className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer text-xs transition-colors ${
-                paymentMethod === 'online'
-                  ? 'border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-300 font-bold'
-                  : 'border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-300'
-              }`}>
+              <label
+                className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer text-xs transition-colors ${
+                  paymentMethod === 'online'
+                    ? 'border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-300 font-bold'
+                    : 'border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-300'
+                }`}
+              >
                 <input
                   type="radio"
                   name="payment"
@@ -278,7 +393,7 @@ export const CheckoutModal: React.FC = () => {
             </div>
           </div>
 
-          {/* Bill Breakdown with Comma Formatting */}
+          {/* Bill Breakdown with Loyalty Discount & Comma Formatting */}
           <div className="p-3.5 rounded-xl bg-stone-50 dark:bg-stone-800/80 border border-stone-200 dark:border-stone-700 space-y-2 text-xs">
             <div className="flex justify-between text-stone-600 dark:text-stone-400">
               <span>Items Total ({cart.length} items)</span>
@@ -287,9 +402,18 @@ export const CheckoutModal: React.FC = () => {
               </span>
             </div>
 
+            {loyaltyDiscount > 0 && (
+              <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-semibold">
+                <span>Loyalty Points Discount ({pointsToRedeem} pts)</span>
+                <span className="tabular-nums">- {formatPrice(loyaltyDiscount)}</span>
+              </div>
+            )}
+
             {orderType === 'delivery' && (
               <div className="flex justify-between text-stone-600 dark:text-stone-400">
-                <span>Distance-Based Delivery ({selectedArea.name.split(' - ')[0]} · ~{selectedArea.distanceKm} km)</span>
+                <span>
+                  Distance-Based Delivery ({selectedArea.name.split(' - ')[0]} · ~{selectedArea.distanceKm} km)
+                </span>
                 <span className="font-semibold text-stone-900 dark:text-stone-200 tabular-nums">
                   {formatPrice(deliveryFee)}
                 </span>
@@ -302,11 +426,17 @@ export const CheckoutModal: React.FC = () => {
                 {formatPrice(total)}
               </span>
             </div>
+
+            {user && estimatedPointsToEarn > 0 && (
+              <div className="flex justify-between items-center text-[11px] text-amber-700 dark:text-amber-300 pt-1">
+                <span>Loyalty Points You&apos;ll Earn</span>
+                <span className="font-bold">+{estimatedPointsToEarn} pts</span>
+              </div>
+            )}
           </div>
 
           {/* Action Buttons */}
           <div className="space-y-2 pt-2">
-            {/* Primary Order & Send to WhatsApp */}
             <button
               type="button"
               onClick={(e) => handleSubmit(e, true)}
@@ -317,7 +447,6 @@ export const CheckoutModal: React.FC = () => {
               <span>Confirm &amp; Send Order via WhatsApp</span>
             </button>
 
-            {/* Standard Online Placement with Logo Gold */}
             <button
               type="submit"
               disabled={isSubmitting}
